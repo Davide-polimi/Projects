@@ -1,0 +1,543 @@
+
+close all
+clc
+
+set(groot, 'defaultTextInterpreter', 'latex')
+set(groot,'defaultAxesXMinorGrid','on','defaultAxesXMinorGridMode','manual');
+set(groot,'defaultAxesYMinorGrid','on','defaultAxesYMinorGridMode','manual');
+set(groot, 'defaultLegendInterpreter', 'latex')
+set(groot, 'defaultAxesTickLabelInterpreter', 'latex')
+set(groot, 'defaultFigureColormap', turbo(256));
+set(groot, 'defaultSurfaceEdgeAlpha', 0.3);
+set(groot, 'defaultFigureColor', [1; 1; 1]);
+set(groot, 'defaultAxesColor', 'none');
+set(groot, 'defaultAxesFontSize',12);
+%% FINAL PROJECT CHECKLIST 
+
+% Structure properties
+
+l1 = 1.2; %[m]
+l2 = 1; %[m]
+l3 = 0.8; %[m]
+V = l1*l2*l3; %[m^3]
+m_b = 148.5; %[kg]
+m_solar_panel = 1.5;%[kg]
+m = m_b + m_solar_panel;
+Ix_b = 1/12 * m_b * (l2^2+l3^2); %[kg * m^2]
+Iy_b = 1/12 * m_b * (l1^2+l3^2); %[kg * m^2]
+Iz_b = 1/12 * m_b * (l1^2+l2^2); %[kg * m^2]
+l1_s = l1; %[m]
+l2_s = l2; %[m]
+l3_s = 0.04; %[m]
+Ix_s = 1/12 * m_solar_panel * (l2_s^2+l3_s^2); %[kg * m^2]
+Iy_s = 1/12 * m_solar_panel * (l1_s^2+l3_s^2); %[kg * m^2]
+Iz_s = 1/12 * m_solar_panel * (l1_s^2+l2_s^2); %[kg * m^2]
+I = diag([Ix_b+Ix_s,Iy_b+Iy_s,Iz_b+Iz_s]);
+
+
+%% Orbit characterisation
+
+mu_E = astroConstants(13); %[km^3/s^2]
+R_E = astroConstants(23); %[km]
+mu_S = astroConstants(4); %[km^3/s^2]
+Year = astroConstants(32); %[Days]
+J2 = astroConstants(9); %[~]
+e = 0; %[~]
+i = deg2rad(98.3); %[rad]
+OM = deg2rad(270); %[rad]
+om = 0; %[rad]
+th0 = 0; %[rad]
+
+% Define sun-synchronous orbit of the S/C
+
+alpha_sun = 2*pi/(Year * 24 * 3600); %[rad/s]
+sun_syncr = @(a) -3/2 * sqrt(mu_E) * J2 * R_E^2/((1-e^2)^2 * a^(7/2)) * cos(i) - alpha_sun;
+a = fzero(sun_syncr, R_E); %[km]
+T = 2*pi * sqrt(a^3/mu_E); %[s]
+n = sqrt(mu_E/a^3); %[rad/s]
+
+% Define Earth orbit around the sun
+
+s_date = [2023 03 21 0 0 0];
+t0 = date2mjd2000(s_date);
+[kep_E , ~] = uplanet(t0, 3);
+a_S = kep_E(1); %[km]
+e_S = kep_E(2); %[~]
+i_S = kep_E(3); %[rad]
+th_0_S = kep_E(6); %[rad]
+T_S = 2*pi*sqrt(a_S^3/mu_S); %[s]
+n_S = 2*pi/T_S; %[rad/s]
+eps = deg2rad(23.45); %[rad/s]
+wT= 15.04 *pi/(3600*180); %[rad/s]
+
+%% plot of the orbit
+[r0,v0] = kep2car(a, e, i, OM, om, th0, mu_E);
+y0 = [r0; v0];
+tspan = 0:0.1:T;
+options = odeset( 'RelTol', 1e-13, 'AbsTol', 1e-14 );
+[t, y] = ode113(@(t,y) ode_2bp(t,y,mu_E), tspan, y0, options);
+
+figure();
+hold on
+grid on
+plot3(y(:,1),y(:,2),y(:,3),'LineWidth',2);
+plotPlanet(3,[0 0 0], gca, astroConstants(23)/astroConstants(3));
+xlabel('X[km]');
+ylabel('Y[km]');
+zlabel('Z[km]');
+title('$LEO$ $orbit$','FontSize',15,'Interpreter','latex')
+%% STABILITY
+
+K_yaw = (I(3,3)-I(2,2))/I(1,1);
+K_roll = (I(3,3) - I(1,1))/I(2,2);
+K_pitch = (I(2,2)-I(1,1))/(I(3,3));
+
+x = -1:0.001:1;
+y = -1:0.001:1;
+f = @(x) (-3*x.^2 + 4*sqrt(3)*sqrt(x.^2-x.^3)+7*x)./(x.^2);
+col = -0.335:0.001:0;
+graf =-1:0.001:-0.146;
+
+% Stability evaluation
+
+figure()
+hold on
+area([-1 0 1], [ 1 1 1],'FaceColor','g')
+area([-1 0], [ -1 -1],'FaceColor','r')
+area([0 1], [-1 -1],'FaceColor','c')
+area([-1 0 1], [ 0 0 1],'FaceColor','w')
+area(col,f(col),'FaceColor','w')
+area([graf 0],[f(graf) 0],'FaceColor','g')
+
+plot(x,y, 'k')
+plot([0 0], [-1 1], 'k');
+plot([-1 -1], [-1 1], 'k');
+plot([1 1], [-1 1], 'k');
+plot([-1 1], [0 0], 'k');
+plot([-1 1], [-1 -1], 'k');
+plot([-1 1], [1 1], 'k');
+plot(x,f(x),'k');
+plot(K_roll,K_yaw,'Marker','o','MarkerEdgeColor','k','MarkerFaceColor','m','MarkerSize',9);
+axis equal
+xlim([-1,1])
+ylim([-1,1])
+xlabel('$K_{roll}$','Interpreter','latex','FontWeight','bold','FontSize',13)
+ylabel('$K_{yaw}$','Interpreter','latex','FontWeight','bold','FontSize',13)
+legend('$Pitch$ $Instability$','$Roll$ $Instability$','$Yaw$ $Instability$','$Stable$ $Conditions$','','','','','','','','','','','$SATELLITE$','Interpreter','Latex','Location','bestoutside')
+title('$Stability$','Interpreter','latex','FontWeight','bold','FontSize',13)
+
+%% Initial condition
+
+% Initial angular velocity after the De-Tumbling phase 
+om_0 = [0.08 0.08 0.08]'; %[rad/s]
+
+% Initial guess of Attitude Matrix
+phi = pi/7;
+A_0 = [-cos(phi) -sin(phi) 0; 0 0 1; -sin(phi) cos(phi) 0];
+
+%% Torques
+
+% Solar Radiation Pressure
+J_dep = I;
+N_B = [1 0 0; 0 1 0; -1 0 0; 0 -1 0; 0 0 1; 0 0 -1]';
+rho_S = [0.5, 0.5, 0.5, 0.5, 0.5, 0.1];
+rho_d = 0.1*ones(6,1);
+A1 = l2 * (l3+l3_s); %[m^2]
+A2 = l1 * (l3+l3_s); %[m^2]
+A3 = l1 * l2; %[m^2]
+A = [A1 A2 A1 A2 A3 A3];
+r_F = [l1/2 0 0; 0 l2/2 0; -l1/2 0 0; 0 -l2/2 0; 0 0 (l3+l3_s)/2; 0 0 -(l3+l3_s)/2]';
+Fe = 1358 + 550 + 135; %[W/m^2]
+c = astroConstants(5) * 1e+3; %[m/s]
+P = Fe/c; 
+
+%% Magnetic model
+j_b = 1.4e-3 *[0.2 0.2 1]'*m; %[A*m^2]
+alpha_G_0 = deg2rad(0); %[rad]
+n_order = 13;
+
+% Magnetic Torque due to the Earth's Magnetic Field
+[g, h] = IGRF13_2020;
+m_angle = deg2rad(11.5); %[rad]
+
+%% Sensors
+
+% Gyro model
+FS = deg2rad(400); %[rad]
+nbit = 24;
+Resolution = (FS/2^(nbit+1)); %[rad]
+f = 15; %[Hz] 
+sample_time = 1/f; %[s]
+SF_nl = 30 * 1e-6;
+SF_r = 30 * 1e-6;
+SF_a = 30 * 1e-6;
+RRW = (deg2rad(0.01)*sqrt(sample_time)/3600)^2; %[rad^2/s^3]
+mis_gyros = [-1 + 2*rand, -1 + 2*rand, -1 + 2*rand]*(0.001);
+A_mis_gyros = eye(3) - [0 -mis_gyros(3) mis_gyros(2); mis_gyros(3) 0 -mis_gyros(1); -mis_gyros(2) mis_gyros(1) 0];
+ARW = (deg2rad(0.002)/60)^2; %[rad^2/s]
+k_filt_g = 0.75;
+
+% Magnetometer model
+FS_mag = 30; %[V]
+mis_MAG = [-1 + 2*rand, -1 + 2*rand, -1 + 2*rand]*deg2rad(0.1);
+A_mis_MAG = eye(3) - [0 -mis_MAG(3) mis_MAG(2); mis_MAG(3) 0 -mis_MAG(1); -mis_MAG(2) mis_MAG(1) 0];
+Acc = 0.75e-2;
+Lin = 0.015e-2;
+nbit_mag = 24;
+Sens = 100e-6/1e-9; %[V/T]
+Res_mag = FS_mag/(2^(nbit_mag+1)); %[V]
+Noise_Mag = (12e-12)^2; %[T/sqrt(Hz)]
+f_mag = 5; %[Hz]
+sample_time_mag = 1/f_mag; %[s]
+k_filt_m = 0.75;
+
+% Sun sensor model
+f_ss = 5; %[Hz]
+t_ss = 1/f_ss; %[s]
+FS = deg2rad(140); %[rad]
+nbit=24;
+res_ss = FS/2^(nbit+1); %[rad]
+mis_ss=[-1 + 2*rand, -1 + 2*rand, -1 + 2*rand]*deg2rad(0.1);
+DCM_MIS_SS=eye(3) - [0 -mis_ss(3) mis_ss(2); mis_ss(3) 0 -mis_ss(1); -mis_ss(2) mis_ss(1) 0];
+DCM_SS_B = eye(3);
+Acc_ss = 0.1; %[deg]
+Noise_sun_sensor = deg2rad(Acc_ss)^2*t_ss; %[rad^2/s]
+Sensor_normal_direction=[0 0 -1]'; 
+Sensor_fov_direction=cos(FS/2); 
+k_filt_s = 0.75;
+
+%% Attitude determination
+
+alpha_1_t = 1; % sun sensor Wabha's weight
+alpha_2_t = 1/30; % magnetometer Wabha's weight
+
+% weight normalization
+alpha_1 = alpha_1_t/(alpha_1_t + alpha_2_t);
+alpha_2 = alpha_2_t/(alpha_1_t + alpha_2_t);
+
+% Wabha's weights vector
+alpha = [alpha_1 alpha_2]';
+
+%% Control
+% Detumbling
+Kb=(1e8); %detumbling gain
+om_detumbling=4*n; %norm of the angular velocity condition to end detumbling
+
+% Slew manoeuvre
+om_target=[0,0,n]'; %[rad/s]
+K1_slew=433*[1,1,1]; %integral gain slew manoeuvre
+K2_slew=2.19*[1,1,1]; %proportional gain slew manoeuvre
+
+om_error_slew_min=0.1*n; %[rad/s] norm of the angular velocity error 
+% condition to end slew manoeuvre
+alpha_error_slew_min=deg2rad(10); %[rad] norm of the angular error 
+% condition to end slew manoeuvre
+
+% Nominal control
+Kpx = 0.005; Kpy = Kpx; Kpz = 0.005; % nominal integral proportional gains
+Kdx = 0.5; Kdy=Kdx; Kdz = 0.5; % nominal propotional gains
+K_non_lin=0.1; % nominal non-linear term gain
+
+%% Magnetorquer
+magnetic_dipole_max=120; %[Am^2]
+diameter_coil=30e-3; %[m]
+Area_coil=pi * diameter_coil^2/4;%[m^2]
+power_max_coil=2.4; %[W]
+max_voltage_torq=14; %[V]
+current_max_coil=power_max_coil/max_voltage_torq; %[A]
+n_coil=ceil(magnetic_dipole_max/(Area_coil*current_max_coil));
+nA_coeff=n_coil*Area_coil; %[m^2]
+coil_nominal_resistance=max_voltage_torq^2/power_max_coil; %[Ω]
+linearity_mag_error=0.02;
+residual_dipole=abs(0.005*magnetic_dipole_max*randn); %[Am^2]
+reference_T=21.5+273.15; %[K]
+resistance_tol=0.05*randn;
+TCR=0.0039; % temperature coefficient of resistance [Ω/K]
+R_th=0.1; % thermal resistance of aluminum double insulated wire [K/W]
+FS_pwm=30; % PWM full scale [V]
+nbit_pwm=12;
+resolution_pwm=FS_pwm/(2^(nbit_pwm+1));
+noise_pwm=50e-6; %[V]
+
+%% Reaction wheel
+mis_RW = [-1 + 2*rand, -1 + 2*rand, -1 + 2*rand]*deg2rad(0.01);
+Mounting_error_RW= eye(3) - [0 -mis_RW(3) mis_RW(2); mis_RW(3) 0 -mis_RW(1); -mis_RW(2) mis_RW(1) 0];
+Mounting_matrix_RW= eye(3);
+RW_axis=[0;0;1]; % for projection on to RW axis
+r_RW=0.312/2; % RW radius [m]
+m_RW=10; % RW mass [kg]
+Izz_RW=1/2*m_RW*(r_RW^2); % RW inertia along the rotation axis [kgm^2]
+h_RW_error=0.002; %[Nms]
+w_max_RW=3500*(2*pi)/60; %[rad/s]
+w0_RW=w_max_RW/4; % initial angular velocity[rad/s]
+w_RW_error=h_RW_error/Izz_RW; %[rad/s]
+T_RW_max=0.2; % maximum RW torque [N]
+dw0_RW=0; % initial angular acceleration [rad/s^2]
+h_max_RW=25; % maximum angular momentum [Nms]
+
+%% Simulink model
+simOptions.Solver = "ode3";
+simOptions.FixedStep = "1/f";
+simOptions.Stoptime = "2*T";
+
+out = sim('Project_simulink.slx',simOptions);
+
+%% Perturbations plots
+
+M_SRP = out.SRP;
+M_MAG = out.MAG;
+M_GRA = out.GG;
+
+M_GRA_norm = vecnorm(M_GRA');
+M_MAG_norm = vecnorm(M_MAG');
+M_SRP_norm = vecnorm(M_SRP');
+
+% norm of M plot
+figure();
+
+semilogy(out.tout/T,M_SRP_norm,'r','LineWidth',0.5);
+hold on
+grid on
+semilogy(out.tout/T,M_MAG_norm,'g','LineWidth',0.5);
+semilogy(out.tout/T,M_GRA_norm,'b','LineWidth',0.5);
+
+xlabel('$Orbit$ $Periods$');
+ylabel('$Disturbance$ $Torques$ $[N*m]$');
+legend('$Solar$ $radiation$ $pressure$','$Magnetic$','$Gravity$ $gradient$');
+title('$Disturbances$')
+%% Result plots
+w_error=out.w_error;
+alpha_error=out.alpha_error;
+T_RW=out.T_RW;
+t=out.tout;
+m_x=out.m_x;
+m_y=out.m_y;
+m_z=out.m_z;
+
+flag_det_slew=out.flag_det_slew;
+flag_slew_nom=out.flag_slew_nom;
+
+ind_det_slew=0;
+ind_slew_nom=0;
+flag_size=size(flag_slew_nom);
+
+%find time of change of phase
+flag=0;
+for ind=1:flag_size
+    if flag_det_slew(ind)==0 && flag==0
+        ind_det_slew=ind;
+        flag=1;
+    end
+end
+t_det_slew=t(ind_det_slew);
+
+flag=0;
+for ind=1:flag_size
+    if flag_slew_nom(ind)==0 && flag==0
+        ind_slew_nom=ind;
+        flag=1;
+    end
+end
+t_slew_nom=t(ind_slew_nom);
+
+% Dipole moment plot
+figure()
+hold on
+plot(t,m_x)
+plot(t,m_y)
+plot(t,m_z)
+
+plot([0 t(end)],[magnetic_dipole_max magnetic_dipole_max],'--k')
+plot([0 t(end)],[-magnetic_dipole_max -magnetic_dipole_max],'--k')
+plot([t_det_slew;t_det_slew],[-magnetic_dipole_max magnetic_dipole_max],'--k')
+plot([t_slew_nom;t_slew_nom],[-magnetic_dipole_max magnetic_dipole_max],'--k')
+
+xlabel('$Time [s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+ylabel('$Dipole moment[Am^2]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+legend('$m_x$','$m_y$','$m_z$','$m_{max}$','Interpreter','latex','FontSize',20)
+title('$Dipole$ $moment$ $over$ $time$','Interpreter','latex','FontWeight','bold','FontSize',20)
+
+% Control torque reaction wheel plot
+figure()
+hold on
+plot(t,T_RW)
+
+plot([0 t(end)],[T_RW_max T_RW_max],'--k')
+plot([0 t(end)],[-T_RW_max -T_RW_max],'--k')
+plot([t_det_slew;t_det_slew],[-T_RW_max T_RW_max],'--k')
+plot([t_slew_nom;t_slew_nom],[-T_RW_max T_RW_max],'--k')
+
+xlabel('$Time [s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+ylabel('$Control$ $torque$ $reaction$ $wheel[Nm]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+legend('$Control$ $torque$ $RW$','$Maximum$ $control$ $torque$','Interpreter','latex','FontSize',20)
+title('$Control$ $torque$ $reaction$ $wheel$ $over$ $time$','Interpreter','latex','FontWeight','bold','FontSize',20)
+
+% Angular velocity error plot
+figure()
+hold on
+plot(t,w_error(:,1))
+plot(t,w_error(:,2))
+plot(t,w_error(:,3))
+plot([t_det_slew;t_det_slew],[-0.15 0.15],'--k')
+plot([t_slew_nom;t_slew_nom],[-0.15 0.15],'--k')
+xlabel('$Time [s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+ylabel('$Angular$ $velocity$ $error$ $[rad/s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+legend('$\omega\_e_x$','$\omega\_e_y$','$\omega\_e_z$','Interpreter','latex','FontSize',20)
+title('$Angular$ $velocity$ $error$ $over$ $time$','Interpreter','latex','FontWeight','bold','FontSize',20)
+
+% Angular error plot
+figure()
+hold on
+plot(t,alpha_error(:,1))
+plot(t,alpha_error(:,2))
+plot(t,alpha_error(:,3))
+plot([t_det_slew;t_det_slew],[-1 1],'--k')
+plot([t_slew_nom;t_slew_nom],[-1 1],'--k')
+xlabel('$Time [s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+ylabel('$Angular$ $error$ $[rad]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+legend('$\alpha\_e_x$','$\alpha\_e_y$','$\alpha\_e_z$','Interpreter','latex','FontSize',20)
+title('$Angular$ $error$ $over$ $time$','Interpreter','latex','FontWeight','bold','FontSize',20)
+
+%% Detumbling plot
+w_measured=out.om_B+out.w_error;
+% Dipole moment plot
+figure()
+hold on
+plot(t(1:ind_det_slew-1),m_x(1:ind_det_slew-1))
+plot(t(1:ind_det_slew-1),m_y(1:ind_det_slew-1))
+plot(t(1:ind_det_slew-1),m_z(1:ind_det_slew-1))
+plot([0 t_det_slew-1/f],[magnetic_dipole_max magnetic_dipole_max],'--k')
+plot([0 t_det_slew-1/f],[-magnetic_dipole_max -magnetic_dipole_max],'--k')
+xlabel('$Time [s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+ylabel('$Dipole moment[Am^2]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+legend('$m_x$','$m_y$','$m_z$','$m_{max}$','Interpreter','latex','FontSize',20)
+title('$Dipole$ $moment$ $over$ $time$','Interpreter','latex','FontWeight','bold','FontSize',20)
+
+% Angular velocity error plot
+figure()
+hold on
+plot(t(1:ind_det_slew-1),w_measured(1:ind_det_slew-1,1))
+plot(t(1:ind_det_slew-1),w_measured(1:ind_det_slew-1,2))
+plot(t(1:ind_det_slew-1),w_measured(1:ind_det_slew-1,3))
+xlabel('$Time [s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+ylabel('$Angular$ $velocity$ $[rad/s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+legend('$\omega\_x$','$\omega\_y$','$\omega\_z$','Interpreter','latex','FontSize',20)
+title('$Angular$ $velocity$ $over$ $time$','Interpreter','latex','FontWeight','bold','FontSize',20)
+
+% Angular error plot
+figure()
+hold on
+plot(t(1:ind_det_slew-1),alpha_error(1:ind_det_slew-1,1))
+plot(t(1:ind_det_slew-1),alpha_error(1:ind_det_slew-1,2))
+plot(t(1:ind_det_slew-1),alpha_error(1:ind_det_slew-1,3))
+xlabel('$Time [s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+ylabel('$Angular$ $error$ $[rad]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+legend('$\alpha\_e_x$','$\alpha\_e_y$','$\alpha\_e_z$','Interpreter','latex','FontSize',20)
+title('$Angular$ $error$ $over$ $time$','Interpreter','latex','FontWeight','bold','FontSize',20)
+
+%% Slew manoeuvre plot
+
+% Dipole moment plot
+figure()
+hold on
+plot(t(ind_det_slew:ind_slew_nom-1),m_x(ind_det_slew:ind_slew_nom-1))
+plot(t(ind_det_slew:ind_slew_nom-1),m_y(ind_det_slew:ind_slew_nom-1))
+
+plot([t_det_slew t_slew_nom-1/f],[magnetic_dipole_max magnetic_dipole_max],'--k')
+plot([t_det_slew t_slew_nom-1/f],[-magnetic_dipole_max -magnetic_dipole_max],'--k')
+
+xlabel('$Time [s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+ylabel('$Dipole moment[Am^2]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+legend('$m_x$','$m_y$','$m_{max}$','Interpreter','latex','FontSize',20)
+title('$Dipole$ $moment$ $over$ $time$','Interpreter','latex','FontWeight','bold','FontSize',20)
+xlim([t(ind_det_slew),t(ind_slew_nom-1)])
+
+% Control torque reaction wheel plot
+figure()
+hold on
+plot(t(ind_det_slew:ind_slew_nom-1),T_RW(ind_det_slew:ind_slew_nom-1))
+
+xlabel('$Time [s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+ylabel('$Control$ $torque$ $reaction$ $wheel[Nm]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+legend('$T_{RW}$','Interpreter','latex','FontSize',20)
+title('$Control$ $torque$ $reaction$ $wheel$ $over$ $time$','Interpreter','latex','FontWeight','bold','FontSize',20)
+xlim([t(ind_det_slew),t(ind_slew_nom-1)])
+
+% Angular velocity error plot
+figure()
+hold on
+plot(t(ind_det_slew:ind_slew_nom-1),w_error(ind_det_slew:ind_slew_nom-1,1))
+plot(t(ind_det_slew:ind_slew_nom-1),w_error(ind_det_slew:ind_slew_nom-1,2))
+plot(t(ind_det_slew:ind_slew_nom-1),w_error(ind_det_slew:ind_slew_nom-1,3))
+
+xlabel('$Time [s]$','Interpreter','latex','FontWeight','bold','FontSize',13)
+ylabel('$Angular$ $velocity$ $error$ $[rad/s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+legend('$\omega\_e_x$','$\omega\_e_y$','$\omega\_e_z$','Interpreter','latex','Location','bestoutside')
+title('$Angular$ $velocity$ $error$ $over$ $time$','Interpreter','latex','FontWeight','bold','FontSize',20)
+xlim([t(ind_det_slew),t(ind_slew_nom-1)])
+
+% Angular error plot
+figure()
+hold on
+plot(t(ind_det_slew:ind_slew_nom-1),alpha_error(ind_det_slew:ind_slew_nom-1,1))
+plot(t(ind_det_slew:ind_slew_nom-1),alpha_error(ind_det_slew:ind_slew_nom-1,2))
+plot(t(ind_det_slew:ind_slew_nom-1),alpha_error(ind_det_slew:ind_slew_nom-1,3))
+
+xlabel('$Time [s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+ylabel('$Angular$ $error$ $[rad]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+legend('$\alpha\_e_x$','$\alpha\_e_y$','$\alpha\_e_z$','Interpreter','latex','FontSize',20)
+title('$Angular$ $error$ $over$ $time$','Interpreter','latex','FontWeight','bold','FontSize',20)
+xlim([t(ind_det_slew),t(ind_slew_nom-1)])
+%% Nominal control plot
+
+% Dipole moment plot
+figure()
+hold on
+plot(t(ind_slew_nom:end),m_x(ind_slew_nom:end))
+plot(t(ind_slew_nom:end),m_y(ind_slew_nom:end))
+
+plot([t_slew_nom t(end)],[magnetic_dipole_max magnetic_dipole_max],'--k')
+plot([t_slew_nom t(end)],[-magnetic_dipole_max -magnetic_dipole_max],'--k')
+
+xlabel('$Time [s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+ylabel('$Dipole moment[Am^2]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+legend('$m_x$','$m_y$','$m_{max}$','Interpreter','latex','FontSize',20)
+title('$Dipole$ $moment$ $over$ $time$','Interpreter','latex','FontWeight','bold','FontSize',20)
+xlim([t(ind_slew_nom),t(end)])
+
+% Control torque reaction wheel plot
+figure()
+hold on
+plot(t(ind_slew_nom:end),T_RW(ind_slew_nom:end,3))
+
+xlabel('$Time [s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+ylabel('$Control$ $torque$ $reaction$ $wheel[Nm]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+legend('$T_{RW}$','Interpreter','latex','FontSize',20)
+title('$Control$ $torque$ $reaction$ $wheel$ $over$ $time$','Interpreter','latex','FontWeight','bold','FontSize',20)
+xlim([t_slew_nom, t(end)])
+
+% Angular velocity error plot
+figure()
+hold on
+plot(t(ind_slew_nom:end),w_error(ind_slew_nom:end,1))
+plot(t(ind_slew_nom:end),w_error(ind_slew_nom:end,2))
+plot(t(ind_slew_nom:end),w_error(ind_slew_nom:end,3))
+
+xlabel('$Time [s]$','Interpreter','latex','FontWeight','bold','FontSize',13)
+ylabel('$Angular$ $velocity$ $error$ $[rad/s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+legend('$\omega\_e_x$','$\omega\_e_y$','$\omega\_e_z$','Interpreter','latex','FontSize',20)
+title('$Angular$ $velocity$ $error$ $over$ $time$','Interpreter','latex','FontWeight','bold','FontSize',20)
+xlim([t(ind_slew_nom),t(end)])
+
+% Angular error plot
+figure()
+hold on
+plot(t(ind_slew_nom:end),alpha_error(ind_slew_nom:end,1))
+plot(t(ind_slew_nom:end),alpha_error(ind_slew_nom:end,2))
+plot(t(ind_slew_nom:end),alpha_error(ind_slew_nom:end,3))
+
+xlabel('$Time [s]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+ylabel('$Angular$ $error$ $[rad]$','Interpreter','latex','FontWeight','bold','FontSize',20)
+legend('$\alpha\_e_x$','$\alpha\_e_y$','$\alpha\_e_z$','Interpreter','latex','FontSize',20)
+title('$Angular$ $error$ $over$ $time$','Interpreter','latex','FontWeight','bold','FontSize',20)
+xlim([t(ind_slew_nom),t(end)])
