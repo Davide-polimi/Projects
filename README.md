@@ -1,5 +1,5 @@
 Projects folder ( Codes, Reports, Final presentations):
-- ESA Academy's Concurrent Engineering Challenge
+- Bayesian Optimization
 - Optimal Guidance
 - Navigation Filters
 - Airborn Launcher Design
